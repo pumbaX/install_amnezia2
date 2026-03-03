@@ -6,7 +6,7 @@
 
 ## Что это
 
-[AmneziaWG 2.0]([https://docs.amnezia.org](https://m-1-13-3w5hsuiikq-ez.a.run.app/ru)) — продвинутый VPN-протокол на базе WireGuard с обфускацией трафика под обычные протоколы (QUIC, DNS и др.). Устойчив к DPI-блокировкам.
+[AmneziaWG 2.0]([https://docs.amnezia.org](https://m-1-13-3w5hsuiikq-ez.a.run.app/ru) — продвинутый VPN-протокол на базе WireGuard с обфускацией трафика под обычные протоколы (QUIC, DNS и др.). Устойчив к DPI-блокировкам.
 
 ## Файлы
 
