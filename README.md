@@ -1,4 +1,6 @@
-# install_amnezia.sh
+
+# Install_amnezia.sh![Uploading Screenshot_5.png…]()
+
 
 Два скрипта для быстрого развёртывания **AmneziaWG 2.0** на чистом VPS (Ubuntu 22.04 / 24.04).
 
