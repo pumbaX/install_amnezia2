@@ -114,14 +114,9 @@ bash <(curl -s https://raw.githubusercontent.com/pumbaX/install_amnezia.sh/main/
 ## Сброс и переустановка
 
 ```bash
-ip link delete dev awg0 2>/dev/null; bash gen_awg2.sh
 awg-quick down /etc/amnezia/amneziawg/awg0.conf 2>/dev/null || true
 rm -rf /etc/amnezia
 rm -f /root/client1_awg2.conf
 ip link delete dev awg0 2>/dev/null || true
-./gen_awg2.sh
 ```
-
-## Лицензия
-
-MIT
+##
