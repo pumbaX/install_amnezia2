@@ -11,17 +11,18 @@ echo "  1) Cloudflare  — 1.1.1.1, 1.0.0.1"
 echo "  2) Google      — 8.8.8.8, 8.8.4.4"
 echo "  3) OpenDNS     — 208.67.222.222, 208.67.220.220"
 echo "  4) Ввести вручную"
-read -rp "Выбор [1-4]: " DNS_CHOICE
+read -rp "Выбор [1-4] (Enter = Cloudflare): " DNS_CHOICE
+DNS_CHOICE=${DNS_CHOICE:-1}
 
 case $DNS_CHOICE in
   1) CLIENT_DNS="1.1.1.1, 1.0.0.1" ;;
   2) CLIENT_DNS="8.8.8.8, 8.8.4.4" ;;
   3) CLIENT_DNS="208.67.222.222, 208.67.220.220" ;;
-  4) read -rp "Введи DNS (через запятую): " CLIENT_DNS ;;
+  4) read -rp "Введи DNS: " CLIENT_DNS ;;
   *) CLIENT_DNS="1.1.1.1, 1.0.0.1" ;;
 esac
 
-# ── Выбор IP клиента ───────────────────────────────────────
+# ── Выбор IP ───────────────────────────────────────────────
 echo ""
 echo "Выбери Address для клиента:"
 echo "  1) 10.8.0.2/32"
@@ -29,7 +30,8 @@ echo "  2) 10.8.1.2/32"
 echo "  3) 10.10.0.2/32"
 echo "  4) 10.10.11.2/32"
 echo "  5) Ввести вручную"
-read -rp "Выбор [1-5]: " ADDR_CHOICE
+read -rp "Выбор [1-5] (Enter = 10.8.0.2): " ADDR_CHOICE
+ADDR_CHOICE=${ADDR_CHOICE:-1}
 
 case $ADDR_CHOICE in
   1) CLIENT_ADDR="10.8.0.2/32";   SERVER_ADDR="10.8.0.1/24";   CLIENT_NET="10.8.0.0/24" ;;
@@ -37,9 +39,9 @@ case $ADDR_CHOICE in
   3) CLIENT_ADDR="10.10.0.2/32";  SERVER_ADDR="10.10.0.1/24";  CLIENT_NET="10.10.0.0/24" ;;
   4) CLIENT_ADDR="10.10.11.2/32"; SERVER_ADDR="10.10.11.1/24"; CLIENT_NET="10.10.11.0/24" ;;
   5)
-    read -rp "Введи IP клиента (пример: 10.20.0.2/32): " CLIENT_ADDR
-    read -rp "Введи IP сервера (пример: 10.20.0.1/24): " SERVER_ADDR
-    read -rp "Введи подсеть для NAT (пример: 10.20.0.0/24): " CLIENT_NET
+    read -rp "IP клиента: " CLIENT_ADDR
+    read -rp "IP сервера: " SERVER_ADDR
+    read -rp "Подсеть NAT: " CLIENT_NET
     ;;
   *) CLIENT_ADDR="10.8.0.2/32"; SERVER_ADDR="10.8.0.1/24"; CLIENT_NET="10.8.0.0/24" ;;
 esac
@@ -48,17 +50,18 @@ esac
 echo ""
 echo "Выбери MTU:"
 echo "  1) 1420 — стандартный"
-echo "  2) 1380 — лучше для мобильных / нестабильных сетей"
+echo "  2) 1380 — лучше для мобильных"
 echo "  3) 1280 — максимальная совместимость"
 echo "  4) Ввести вручную"
-read -rp "Выбор [1-4]: " MTU_CHOICE
+read -rp "Выбор [1-4] (Enter = 1380): " MTU_CHOICE
+MTU_CHOICE=${MTU_CHOICE:-2}
 
 case $MTU_CHOICE in
   1) MTU=1420 ;;
   2) MTU=1380 ;;
   3) MTU=1280 ;;
-  4) read -rp "Введи MTU (1280-1420): " MTU ;;
-  *) MTU=1420 ;;
+  4) read -rp "MTU: " MTU ;;
+  *) MTU=1380 ;;
 esac
 
 echo ""
@@ -66,8 +69,9 @@ echo "✓ DNS:    $CLIENT_DNS"
 echo "✓ Клиент: $CLIENT_ADDR"
 echo "✓ Сервер: $SERVER_ADDR"
 echo "✓ MTU:    $MTU"
-read -rp "Продолжить? [y/n]: " CONFIRM
-[[ $CONFIRM != "y" ]] && { echo "Отменено."; exit 0; }
+read -rp "Продолжить? [Y/n]: " CONFIRM
+CONFIRM=${CONFIRM:-y}
+[[ $CONFIRM != "y" && $CONFIRM != "Y" ]] && { echo "Отменено."; exit 0; }
 
 # ── Ключи ──────────────────────────────────────────────────
 SERVER_PRIVKEY=$(awg genkey)
@@ -96,7 +100,6 @@ H4="${STARTS[3]}-$((STARTS[3] + RANDOM % 100000000 + 10000000))"
 
 I1='<b 0x084481800001000300000000077469636b65747306776964676574096b696e6f706f69736b0272750000010001c00c0005000100000039001806776964676574077469636b6574730679616e646578c025c0390005000100000039002b1765787465726e616c2d7469636b6574732d776964676574066166697368610679616e646578036e657400c05d000100010000001c000457fafe25>'
 
-# ── IP Forwarding ──────────────────────────────────────────
 echo 1 > /proc/sys/net/ipv4/ip_forward
 grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf || \
   echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
@@ -104,12 +107,15 @@ sysctl -p
 
 mkdir -p /etc/amnezia/amneziawg
 
+# Снос старого интерфейса если есть
+awg-quick down /etc/amnezia/amneziawg/awg0.conf 2>/dev/null || \
+  ip link delete dev awg0 2>/dev/null || true
+
 cat > /etc/amnezia/amneziawg/awg0.conf <<EOF
 [Interface]
 PrivateKey = $SERVER_PRIVKEY
 Address = $SERVER_ADDR
 ListenPort = $PORT
-MTU = $MTU
 Jc = $Jc
 Jmin = $Jmin
 Jmax = $Jmax
@@ -123,7 +129,7 @@ H3 = $H3
 H4 = $H4
 I1 = $I1
 
-PostUp   = echo 1 > /proc/sys/net/ipv4/ip_forward; \
+PostUp   = ip link set dev awg0 mtu $MTU; echo 1 > /proc/sys/net/ipv4/ip_forward; \
            iptables -t nat -A POSTROUTING -s $CLIENT_NET -o $IFACE -j MASQUERADE; \
            iptables -A FORWARD -i awg0 -j ACCEPT; \
            iptables -A FORWARD -o awg0 -j ACCEPT
@@ -177,7 +183,5 @@ echo "✓ Сервер: /etc/amnezia/amneziawg/awg0.conf"
 echo "✓ Клиент: /root/client1_awg2.conf"
 echo "IP: $SERVER_IP:$PORT | Интерфейс: $IFACE"
 echo "DNS: $CLIENT_DNS | MTU: $MTU"
-echo "Адрес клиента: $CLIENT_ADDR"
 echo "Jc=$Jc Jmin=$Jmin Jmax=$Jmax"
-echo "S1=$S1 S2=$S2 S3=$S3 S4=$S4"
 echo "======================================="
