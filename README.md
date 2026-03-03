@@ -107,8 +107,7 @@ chmod +x install.sh gen_awg2.sh
 ## Сброс и переустановка
 
 ```bash
-cd ~ && rm -rf install_amnezia.sh && git clone https://github.com/pumbaX/install_amnezia.sh.git && cd install_amnezia.sh && chmod +x install.sh gen_awg2.sh
-
+ip link delete dev awg0 2>/dev/null; bash gen_awg2.sh
 awg-quick down /etc/amnezia/amneziawg/awg0.conf 2>/dev/null || true
 rm -rf /etc/amnezia
 rm -f /root/client1_awg2.conf
