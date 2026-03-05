@@ -119,7 +119,7 @@ rm -rf /etc/amnezia
 rm -f /root/client1_awg2.conf
 ip link delete dev awg0 2>/dev/null || true
 ```
-## WGDashboard Install
+## WGDashboard Install - !!!НЕ РАБОТАЕТ С AWG2.0!!!! да и вообще плохо работает !!!
 
 ### 1. Остановить старый Dashboard
 ```bash
