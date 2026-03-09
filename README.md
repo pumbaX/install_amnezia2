@@ -59,6 +59,11 @@ bash <(curl -s https://raw.githubusercontent.com/pumbaX/install_amnezia.sh/main/
 
 ```
 
+### Шаг 5 - автостарт 
+```bash
+awg-quick up awg0
+systemctl enable awg-quick@awg0
+```
 Скрипт интерактивно спросит:
 
 **DNS для клиента:**
