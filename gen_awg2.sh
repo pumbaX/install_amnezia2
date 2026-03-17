@@ -124,7 +124,7 @@ H4_START=$(( Q * 3 + RANDOM * RANDOM % Q ))
 H4_W=$(( RANDOM % 100000 + 30000 ))
 H4="${H4_START}-$((H4_START + H4_W))"
 
-I1='<b 0x84050100000100000000000006676f6f676c6503636f6d0000010001><c><t><r 16>'
+I1='<b 0x84050100000100000000000006676f6f676c6503636f6d0000010001>'
 
 echo 1 > /proc/sys/net/ipv4/ip_forward
 grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf || \
