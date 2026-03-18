@@ -28,7 +28,7 @@
 ### Шаг 1 — клонируй репозиторий
 
 ```bash
-git clone https://github.com/pumbaX/install_amnezia.sh.git
+git clone https://github.com/pumbaX/install_amnezia2.git
 cd install_amnezia2
 chmod +x install.sh gen_awg2.sh add_client.sh
 ```
