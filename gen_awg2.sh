@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 [[ $EUID -ne 0 ]] && { echo "Запускай от root"; exit 1; }
 command -v awg &>/dev/null || { echo "ОШИБКА: сначала запусти install.sh"; exit 1; }
 
@@ -23,24 +23,24 @@ esac
 # ── Выбор IP ───────────────────────────────────────────────
 echo ""
 echo "Выбери Address для клиента:"
-echo "  1) 10.8.0.2/32"
-echo "  2) 10.8.1.2/32"
-echo "  3) 10.10.0.2/32"
-echo "  4) 10.10.11.2/32"
+echo "  1) 10.100.0.2/32"
+echo "  2) 10.101.0.2/32"
+echo "  3) 10.102.0.2/32"
+echo "  4) 10.103.0.2/32"
 echo "  5) Ввести вручную"
-read -rp "Выбор [1-5] (Enter = 10.8.0.2): " ADDR_CHOICE
+read -rp "Выбор [1-5] (Enter = 10.100.0.2): " ADDR_CHOICE
 ADDR_CHOICE=${ADDR_CHOICE:-1}
 case $ADDR_CHOICE in
-  1) CLIENT_ADDR="10.8.0.2/32";   SERVER_ADDR="10.8.0.1/24";   CLIENT_NET="10.8.0.0/24" ;;
-  2) CLIENT_ADDR="10.8.1.2/32";   SERVER_ADDR="10.8.1.1/24";   CLIENT_NET="10.8.1.0/24" ;;
-  3) CLIENT_ADDR="10.10.0.2/32";  SERVER_ADDR="10.10.0.1/24";  CLIENT_NET="10.10.0.0/24" ;;
-  4) CLIENT_ADDR="10.10.11.2/32"; SERVER_ADDR="10.10.11.1/24"; CLIENT_NET="10.10.11.0/24" ;;
+  1) CLIENT_ADDR="10.100.0.2/32"; SERVER_ADDR="10.100.0.1/24"; CLIENT_NET="10.100.0.0/24" ;;
+  2) CLIENT_ADDR="10.101.0.2/32"; SERVER_ADDR="10.101.0.1/24"; CLIENT_NET="10.101.0.0/24" ;;
+  3) CLIENT_ADDR="10.102.0.2/32"; SERVER_ADDR="10.102.0.1/24"; CLIENT_NET="10.102.0.0/24" ;;
+  4) CLIENT_ADDR="10.103.0.2/32"; SERVER_ADDR="10.103.0.1/24"; CLIENT_NET="10.103.0.0/24" ;;
   5)
     read -rp "IP клиента: " CLIENT_ADDR
     read -rp "IP сервера: " SERVER_ADDR
     read -rp "Подсеть NAT: " CLIENT_NET
     ;;
-  *) CLIENT_ADDR="10.8.0.2/32"; SERVER_ADDR="10.8.0.1/24"; CLIENT_NET="10.8.0.0/24" ;;
+  *) CLIENT_ADDR="10.100.0.2/32"; SERVER_ADDR="10.100.0.1/24"; CLIENT_NET="10.100.0.0/24" ;;
 esac
 
 # ── Выбор MTU ──────────────────────────────────────────────
@@ -99,7 +99,6 @@ Jmin=10
 Jmax=50
 
 S1=$((RANDOM % 30 + 10))       # 10-39
-# S2 = S1 + случайное из 1..55,57..64 (избегаем S1+56)
 S2_OFF=$((RANDOM % 63 + 1))
 [[ $S2_OFF -eq 56 ]] && S2_OFF=57
 S2=$((S1 + S2_OFF))
@@ -108,8 +107,7 @@ S2=$((S1 + S2_OFF))
 S3=$((RANDOM % 30 + 5))        # 5-34
 S4=$((RANDOM % 16 + 1))        # 1-16
 
-# H1-H4: равномерное распределение по uint32 (4 квадранта)
-Q=1073741823  # (2^32-1) / 4
+Q=1073741823
 H1_START=$(( RANDOM * RANDOM % Q ))
 H1_W=$(( RANDOM % 100000 + 30000 ))
 H1="${H1_START}-$((H1_START + H1_W))"
@@ -126,14 +124,46 @@ H4_START=$(( Q * 3 + RANDOM * RANDOM % Q ))
 H4_W=$(( RANDOM % 100000 + 30000 ))
 H4="${H4_START}-$((H4_START + H4_W))"
 
-# I1: совместимый со всеми версиями AmneziaVPN (без <c><t><r 16>)
-I1='<b 0x84050100000100000000000006676f6f676c6503636f6d0000010001>'
+# ── Выбор I1 ───────────────────────────────────────────────
+echo ""
+echo "Имитация протокола (I1):"
+echo "  1) Google DNS — статический (совместим со всеми клиентами)"
+echo "  2) Яндекс/Кинопоиск DNS — статический"
+echo "  3) Получить с API по домену — QUIC реальный пакет"
+echo "  4) Без имитации (AWG 1.0)"
+read -rp "Выбор [1-4] (Enter = Google): " I1_CHOICE
+I1_CHOICE=${I1_CHOICE:-1}
+I1=""
+case $I1_CHOICE in
+  2)
+    I1='<b 0x084481800001000300000000077469636b65747306776964676574096b696e6f706f69736b0272750000010001c00c0005000100000039001806776964676574077469636b6574730679616e646578c025c0390005000100000039002b1765787465726e616c2d7469636b6574732d776964676574066166697368610679616e646578036e657400c05d000100010000001c000457fafe25>'
+    ;;
+  3)
+    read -rp "Домен (пример: google.com): " API_DOMAIN
+    API_DOMAIN=${API_DOMAIN:-google.com}
+    echo "  → запрос к API для $API_DOMAIN..."
+    API_RESP=$(curl -s --connect-timeout 10 "https://junk.web2core.workers.dev/signature?domain=${API_DOMAIN}")
+    I1=$(echo "$API_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('i1',''))" 2>/dev/null || true)
+    if [[ -z "$I1" ]]; then
+      echo "  ⚠️ API недоступен, используем Google DNS"
+      I1='<b 0x84050100000100000000000006676f6f676c6503636f6d0000010001>'
+    else
+      echo "  ✓ I1 получен с API"
+    fi
+    ;;
+  4)
+    I1=""
+    ;;
+  *)
+    I1='<b 0x84050100000100000000000006676f6f676c6503636f6d0000010001>'
+    ;;
+esac
 
 # ── ip_forward ─────────────────────────────────────────────
 echo 1 > /proc/sys/net/ipv4/ip_forward
 grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf || \
   echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-sysctl -p
+sysctl -p -q || true
 
 mkdir -p /etc/amnezia/amneziawg
 
@@ -158,9 +188,9 @@ awg-quick down /etc/amnezia/amneziawg/awg0.conf 2>/dev/null || \
   echo "H2 = $H2"
   echo "H3 = $H3"
   echo "H4 = $H4"
-  echo "I1 = $I1"
+  [[ -n "$I1" ]] && echo "I1 = $I1"
   echo ""
-  echo "PostUp   = ip link set dev awg0 mtu $MTU; echo 1 > /proc/sys/net/ipv4/ip_forward; iptables -t nat -A POSTROUTING -s $CLIENT_NET -o $IFACE -j MASQUERADE; iptables -A FORWARD -i awg0 -j ACCEPT; iptables -A FORWARD -o awg0 -j ACCEPT"
+  echo "PostUp   = ip link set dev awg0 mtu $MTU; echo 1 > /proc/sys/net/ipv4/ip_forward; iptables -t nat -C POSTROUTING -s $CLIENT_NET -o $IFACE -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s $CLIENT_NET -o $IFACE -j MASQUERADE; iptables -C FORWARD -i awg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i awg0 -j ACCEPT; iptables -C FORWARD -o awg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -o awg0 -j ACCEPT"
   echo "PostDown = iptables -t nat -D POSTROUTING -s $CLIENT_NET -o $IFACE -j MASQUERADE; iptables -D FORWARD -i awg0 -j ACCEPT; iptables -D FORWARD -o awg0 -j ACCEPT"
   echo ""
   echo "[Peer]"
@@ -188,7 +218,7 @@ chmod 600 /etc/amnezia/amneziawg/awg0.conf
   echo "H2 = $H2"
   echo "H3 = $H3"
   echo "H4 = $H4"
-  echo "I1 = $I1"
+  [[ -n "$I1" ]] && echo "I1 = $I1"
   echo ""
   echo "[Peer]"
   echo "PublicKey = $SERVER_PUBKEY"
@@ -211,7 +241,7 @@ if command -v ufw &>/dev/null; then
   fi
 fi
 
-which qrencode &>/dev/null && qrencode -t ansiutf8 -s 1 -m 1 < /root/client1_awg2.conf
+command -v qrencode &>/dev/null && qrencode -t ansiutf8 -s 1 -m 1 < /root/client1_awg2.conf
 
 echo "======================================="
 echo "✓ Сервер: /etc/amnezia/amneziawg/awg0.conf"

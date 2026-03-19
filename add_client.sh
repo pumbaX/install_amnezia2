@@ -14,12 +14,14 @@ LAST_IP=$(grep "^AllowedIPs" "$SERVER_CONF" | awk -F'=' '{print $2}' | tr -d ' '
   | cut -d/ -f1 | cut -d. -f4 | sort -n | tail -1)
 LAST_IP=${LAST_IP:-1}
 NEXT_IP=$((LAST_IP + 1))
+[[ $NEXT_IP -gt 254 ]] && { echo "ОШИБКА: подсеть заполнена (максимум 254 клиента)"; exit 1; }
 CLIENT_ADDR="${BASE_IP}.${NEXT_IP}/32"
 
 echo ""
 echo "Следующий свободный IP: $CLIENT_ADDR"
 read -rp "Имя клиента (пример: phone, laptop): " CLIENT_NAME
 [[ -z "$CLIENT_NAME" ]] && { echo "ОШИБКА: имя не может быть пустым"; exit 1; }
+[[ ! "$CLIENT_NAME" =~ ^[a-zA-Z0-9_-]+$ ]] && { echo "ОШИБКА: только буквы, цифры, _ и -"; exit 1; }
 
 read -rp "Использовать IP $CLIENT_ADDR? [Y/n]: " CONFIRM_IP
 CONFIRM_IP=${CONFIRM_IP:-y}
@@ -45,20 +47,35 @@ case $DNS_CHOICE in
 esac
 
 # ── Выбор I1 ───────────────────────────────────────────────
-# Без <c><t><r 16> — совместимо со всеми версиями AmneziaVPN
 echo ""
 echo "Имитация протокола (I1):"
 echo "  1) Google DNS (рекомендуется, совместимо со всеми клиентами)"
 echo "  2) Яндекс/Кинопоиск DNS"
-echo "  3) Из серверного конфига"
-echo "  4) Без имитации (AWG 1.0)"
-read -rp "Выбор [1-4] (Enter = Google): " I1_CHOICE
+echo "  3) Получить с API по домену — QUIC реальный пакет"
+echo "  4) Из серверного конфига"
+echo "  5) Без имитации (AWG 1.0)"
+read -rp "Выбор [1-5] (Enter = Google): " I1_CHOICE
 I1_CHOICE=${I1_CHOICE:-1}
+I1_LINE=""
 case $I1_CHOICE in
   1) I1_LINE="I1 = <b 0x84050100000100000000000006676f6f676c6503636f6d0000010001>" ;;
   2) I1_LINE="I1 = <b 0x084481800001000300000000077469636b65747306776964676574096b696e6f706f69736b0272750000010001c00c0005000100000039001806776964676574077469636b6574730679616e646578c025c0390005000100000039002b1765787465726e616c2d7469636b6574732d776964676574066166697368610679616e646578036e657400c05d000100010000001c000457fafe25>" ;;
-  3) I1_LINE=$(grep "^I1" "$SERVER_CONF" || true) ;;
-  4) I1_LINE="" ;;
+  3)
+    read -rp "Домен (пример: google.com): " API_DOMAIN
+    API_DOMAIN=${API_DOMAIN:-google.com}
+    echo "  → запрос к API для $API_DOMAIN..."
+    API_RESP=$(curl -s --connect-timeout 10 "https://junk.web2core.workers.dev/signature?domain=${API_DOMAIN}")
+    I1_VAL=$(echo "$API_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('i1',''))" 2>/dev/null || true)
+    if [[ -z "$I1_VAL" ]]; then
+      echo "  ⚠️ API недоступен, используем Google DNS"
+      I1_LINE="I1 = <b 0x84050100000100000000000006676f6f676c6503636f6d0000010001>"
+    else
+      I1_LINE="I1 = ${I1_VAL}"
+      echo "  ✓ I1 получен с API"
+    fi
+    ;;
+  4) I1_LINE=$(grep "^I1" "$SERVER_CONF" || true) ;;
+  5) I1_LINE="" ;;
   *) I1_LINE="I1 = <b 0x84050100000100000000000006676f6f676c6503636f6d0000010001>" ;;
 esac
 
@@ -68,6 +85,7 @@ SERVER_PUBKEY=$(awg show awg0 public-key 2>/dev/null) \
 SERVER_IP=$(curl -s --connect-timeout 10 -4 ifconfig.me)
 [[ -z "$SERVER_IP" ]] && { echo "ОШИБКА: не удалось получить внешний IP"; exit 1; }
 PORT=$(grep "^ListenPort" "$SERVER_CONF" | awk -F'=' '{print $2}' | tr -d ' ')
+[[ -z "$PORT" ]] && { echo "ОШИБКА: не найден ListenPort в конфиге"; exit 1; }
 MTU=$(grep "^PostUp" "$SERVER_CONF" | grep -oP 'mtu \K\d+' | head -1 || true)
 MTU=${MTU:-1380}
 
@@ -88,7 +106,8 @@ PRESHARED_KEY=$(awg genpsk)
 
 awg set awg0 peer "$CLIENT_PUBKEY" \
   preshared-key <(echo "$PRESHARED_KEY") \
-  allowed-ips "$CLIENT_ADDR"
+  allowed-ips "$CLIENT_ADDR" \
+  || { echo "ОШИБКА: не удалось добавить peer в runtime"; exit 1; }
 
 # ── Клиентский конфиг ──────────────────────────────────────
 CLIENT_FILE="/root/${CLIENT_NAME}_awg2.conf"
