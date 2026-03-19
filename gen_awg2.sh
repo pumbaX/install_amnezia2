@@ -2,6 +2,7 @@
 set -e
 [[ $EUID -ne 0 ]] && { echo "Запускай от root"; exit 1; }
 command -v awg &>/dev/null || { echo "ОШИБКА: сначала запусти install.sh"; exit 1; }
+
 # ── Выбор DNS ──────────────────────────────────────────────
 echo ""
 echo "Выбери DNS для клиента:"
@@ -18,6 +19,7 @@ case $DNS_CHOICE in
   4) read -rp "Введи DNS: " CLIENT_DNS ;;
   *) CLIENT_DNS="1.1.1.1, 1.0.0.1" ;;
 esac
+
 # ── Выбор IP ───────────────────────────────────────────────
 echo ""
 echo "Выбери Address для клиента:"
@@ -40,6 +42,7 @@ case $ADDR_CHOICE in
     ;;
   *) CLIENT_ADDR="10.8.0.2/32"; SERVER_ADDR="10.8.0.1/24"; CLIENT_NET="10.8.0.0/24" ;;
 esac
+
 # ── Выбор MTU ──────────────────────────────────────────────
 echo ""
 echo "Выбери MTU:"
@@ -56,6 +59,7 @@ case $MTU_CHOICE in
   4) read -rp "MTU: " MTU ;;
   *) MTU=1380 ;;
 esac
+
 # ── Выбор порта ────────────────────────────────────────────
 echo ""
 read -rp "Порт сервера [51820 / r = случайный]: " PORT
@@ -65,6 +69,7 @@ if [[ "$PORT" == "r" || "$PORT" == "R" ]]; then
 else
   PORT=${PORT:-51820}
 fi
+
 echo ""
 echo "✓ DNS:    $CLIENT_DNS"
 echo "✓ Клиент: $CLIENT_ADDR"
@@ -74,49 +79,69 @@ echo "✓ Порт:   $PORT"
 read -rp "Продолжить? [Y/n]: " CONFIRM
 CONFIRM=${CONFIRM:-y}
 [[ $CONFIRM != "y" && $CONFIRM != "Y" ]] && { echo "Отменено."; exit 0; }
+
 # ── Ключи ──────────────────────────────────────────────────
 SERVER_PRIVKEY=$(awg genkey)
 SERVER_PUBKEY=$(echo "$SERVER_PRIVKEY" | awg pubkey)
 CLIENT_PRIVKEY=$(awg genkey)
 CLIENT_PUBKEY=$(echo "$CLIENT_PRIVKEY" | awg pubkey)
 PRESHARED_KEY=$(awg genpsk)
+
 SERVER_IP=$(curl -s --connect-timeout 10 -4 ifconfig.me)
-[[ -z "$SERVER_IP" ]] && { echo "ОШИБКА: не удалось получить внешний IP";
-exit 1; }
+[[ -z "$SERVER_IP" ]] && { echo "ОШИБКА: не удалось получить внешний IP"; exit 1; }
+
 IFACE=$(ip route | awk '/default/{print $5; exit}')
-Jc=$((RANDOM % 5 + 3))
+[[ -z "$IFACE" ]] && { echo "ОШИБКА: не удалось определить сетевой интерфейс"; exit 1; }
+
+# ── AWG 2.0 параметры ──────────────────────────────────────
+Jc=$((RANDOM % 5 + 3))         # 3-7
 Jmin=10
 Jmax=50
+
 S1=$((RANDOM % 30 + 10))       # 10-39
-S2=$((S1 + RANDOM % 20 + 1))   # != S1+56, ≤ 64
-if [[ $S2 -gt 64 ]]; then S2=64; fi
-if [[ $S2 -eq $((S1 + 56)) ]]; then S2=$((S2 + 1)); fi
-if [[ $S2 -gt 64 ]]; then S2=1; fi
-S3=$((RANDOM % 30 + 5))         # 5-34, ≤ 64
-S4=$((RANDOM % 16 + 1))         # 1-16, строго ≤ 32
-# H1-H4: равномерное распределение по всему uint32 (4 квадранта ~1 млрд каждый)
-Q=$((4294967295 / 4))
+# S2 = S1 + случайное из 1..55,57..64 (избегаем S1+56)
+S2_OFF=$((RANDOM % 63 + 1))
+[[ $S2_OFF -eq 56 ]] && S2_OFF=57
+S2=$((S1 + S2_OFF))
+[[ $S2 -gt 64 ]] && S2=64
+
+S3=$((RANDOM % 30 + 5))        # 5-34
+S4=$((RANDOM % 16 + 1))        # 1-16
+
+# H1-H4: равномерное распределение по uint32 (4 квадранта)
+Q=1073741823  # (2^32-1) / 4
 H1_START=$(( RANDOM * RANDOM % Q ))
 H1_W=$(( RANDOM % 100000 + 30000 ))
 H1="${H1_START}-$((H1_START + H1_W))"
+
 H2_START=$(( Q + RANDOM * RANDOM % Q ))
 H2_W=$(( RANDOM % 100000 + 30000 ))
 H2="${H2_START}-$((H2_START + H2_W))"
+
 H3_START=$(( Q * 2 + RANDOM * RANDOM % Q ))
 H3_W=$(( RANDOM % 100000 + 30000 ))
 H3="${H3_START}-$((H3_START + H3_W))"
+
 H4_START=$(( Q * 3 + RANDOM * RANDOM % Q ))
 H4_W=$(( RANDOM % 100000 + 30000 ))
 H4="${H4_START}-$((H4_START + H4_W))"
+
+# I1: совместимый со всеми версиями AmneziaVPN (без <c><t><r 16>)
 I1='<b 0x84050100000100000000000006676f6f676c6503636f6d0000010001>'
+
+# ── ip_forward ─────────────────────────────────────────────
 echo 1 > /proc/sys/net/ipv4/ip_forward
 grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf || \
   echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 sysctl -p
+
 mkdir -p /etc/amnezia/amneziawg
+
 # Снос старого интерфейса если есть
 awg-quick down /etc/amnezia/amneziawg/awg0.conf 2>/dev/null || \
   ip link delete dev awg0 2>/dev/null || true
+
+# ── Конфиг сервера ─────────────────────────────────────────
 {
   echo "[Interface]"
   echo "PrivateKey = $SERVER_PRIVKEY"
@@ -144,6 +169,8 @@ awg-quick down /etc/amnezia/amneziawg/awg0.conf 2>/dev/null || \
   echo "AllowedIPs = $CLIENT_ADDR"
 } > /etc/amnezia/amneziawg/awg0.conf
 chmod 600 /etc/amnezia/amneziawg/awg0.conf
+
+# ── Конфиг клиента ─────────────────────────────────────────
 {
   echo "[Interface]"
   echo "PrivateKey = $CLIENT_PRIVKEY"
@@ -171,8 +198,10 @@ chmod 600 /etc/amnezia/amneziawg/awg0.conf
   echo "PersistentKeepalive = 25"
 } > /root/client1_awg2.conf
 chmod 600 /root/client1_awg2.conf
+
 awg-quick up /etc/amnezia/amneziawg/awg0.conf
-# ── Открыть порт в UFW ─────────────────────────────────────
+
+# ── UFW ────────────────────────────────────────────────────
 if command -v ufw &>/dev/null; then
   read -rp "Открыть порт $PORT/udp в UFW? [Y/n]: " OPEN_UFW
   OPEN_UFW=${OPEN_UFW:-y}
@@ -181,11 +210,14 @@ if command -v ufw &>/dev/null; then
     echo "✓ Порт ${PORT}/udp открыт"
   fi
 fi
+
 which qrencode &>/dev/null && qrencode -t ansiutf8 -s 1 -m 1 < /root/client1_awg2.conf
+
 echo "======================================="
 echo "✓ Сервер: /etc/amnezia/amneziawg/awg0.conf"
 echo "✓ Клиент: /root/client1_awg2.conf"
 echo "IP: $SERVER_IP:$PORT | Интерфейс: $IFACE"
 echo "DNS: $CLIENT_DNS | MTU: $MTU"
 echo "Jc=$Jc Jmin=$Jmin Jmax=$Jmax"
+echo "S1=$S1 S2=$S2 S3=$S3 S4=$S4"
 echo "======================================="
